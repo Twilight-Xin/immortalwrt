@@ -1,0 +1,82 @@
+name: Build AIC APK (Official ImmortalWrt 25)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdk_url:
+        description: Official ImmortalWrt 25 SDK tarball URL matching your firmware target
+        required: true
+      make_args:
+        description: Extra make arguments
+        required: false
+        default: -j$(nproc) V=s
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-aic-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-aic-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Install host tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zstd build-essential libncurses-dev gawk git gettext libssl-dev rsync unzip zlib1g-dev file wget
+
+      - name: Download and extract official ImmortalWrt 25 SDK
+        env:
+          SDK_URL: ${{ inputs.sdk_url }}
+        run: |
+          set -euxo pipefail
+          sdk_archive="/tmp/immortalwrt-sdk.tar.zst"
+          wget -O "$sdk_archive" "$SDK_URL"
+          mkdir -p /tmp/immortalwrt-sdk
+          tar --zstd -xf "$sdk_archive" -C /tmp/immortalwrt-sdk --strip-components=1
+
+      - name: Inject aic8800 package and prepare config
+        env:
+          MAKE_ARGS: ${{ inputs.make_args }}
+        run: |
+          set -euxo pipefail
+          cd /tmp/immortalwrt-sdk
+
+          rm -rf package/kernel/aic8800
+          cp -a "$GITHUB_WORKSPACE/package/kernel/aic8800" package/kernel/
+
+          cat > .config <<'EOF'
+          CONFIG_PACKAGE_aic8800-pcie-firmware=m
+          CONFIG_PACKAGE_aic8800-sdio-firmware=m
+          CONFIG_PACKAGE_aic8800-usb-firmware=m
+          CONFIG_PACKAGE_kmod-aic8800-btusb=m
+          CONFIG_PACKAGE_kmod-aic8800-pcie=m
+          CONFIG_PACKAGE_kmod-aic8800-sdio=m
+          CONFIG_PACKAGE_kmod-aic8800-usb=m
+          EOF
+
+          make defconfig
+          make package/aic8800/{clean,compile} ${MAKE_ARGS//\$\(nproc\)/$(nproc)}
+
+      - name: Collect aic apk artifacts
+        run: |
+          set -euxo pipefail
+          cd /tmp/immortalwrt-sdk
+          mkdir -p /tmp/aic-apk-output
+          find bin/packages -type f \( -name '*aic8800*.apk' -o -name 'kmod-aic8800*.apk' \) -exec cp -v {} /tmp/aic-apk-output/ \;
+
+      - name: Upload aic apk artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aic-apk-${{ github.run_id }}
+          path: /tmp/aic-apk-output/
+          if-no-files-found: error
+          retention-days: 7
