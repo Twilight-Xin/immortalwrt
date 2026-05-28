@@ -65,7 +65,14 @@ jobs:
       - name: Build
         run: |
           set -euxo pipefail
-          make $MAKE_TARGET $MAKE_ARGS
+          make_jobs="$(nproc)"
+          make_args="${MAKE_ARGS:-}"
+          if [ -z "$make_args" ]; then
+            make_args="-j${make_jobs} V=s"
+          else
+            make_args="${make_args//\$\(nproc\)/$make_jobs}"
+          fi
+          make $MAKE_TARGET $make_args
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
