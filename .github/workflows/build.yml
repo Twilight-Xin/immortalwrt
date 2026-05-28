@@ -61,6 +61,10 @@ jobs:
             cp "$CONFIG_PATH" .config
           fi
           make defconfig
+          if grep -q '^CONFIG_PACKAGE_ip-full=y$' .config && grep -q '^CONFIG_PACKAGE_ip-tiny=y$' .config; then
+            echo "Invalid config: ip-full and ip-tiny are both selected"
+            exit 1
+          fi
 
       - name: Build
         run: |
